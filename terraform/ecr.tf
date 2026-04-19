@@ -8,6 +8,11 @@ resource "aws_ecr_repository" "app" {
   }
 
   tags = merge(local.common_tags, { Name = "${var.project_name}-ecr" })
+
+  lifecycle {
+    ignore_changes  = all
+    prevent_destroy = true
+  }
 }
 
 resource "aws_ecr_lifecycle_policy" "app" {
