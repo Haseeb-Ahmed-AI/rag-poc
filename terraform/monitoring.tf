@@ -123,8 +123,9 @@ resource "aws_cloudwatch_dashboard" "main" {
       {
         type = "metric"
         properties = {
-          title  = "ECS CPU & Memory Utilization"
-          period = 60
+          title   = "ECS CPU & Memory Utilization"
+          region  = "us-east-1"
+          period  = 60
           metrics = [
             ["AWS/ECS", "CPUUtilization", "ServiceName", aws_ecs_service.app.name, "ClusterName", aws_ecs_cluster.main.name],
             ["AWS/ECS", "MemoryUtilization", "ServiceName", aws_ecs_service.app.name, "ClusterName", aws_ecs_cluster.main.name]
@@ -136,8 +137,9 @@ resource "aws_cloudwatch_dashboard" "main" {
       {
         type = "metric"
         properties = {
-          title  = "ALB Request Count"
-          period = 60
+          title   = "ALB Request Count"
+          region  = "us-east-1"
+          period  = 60
           metrics = [
             ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", aws_lb.main.arn_suffix]
           ]
@@ -148,8 +150,9 @@ resource "aws_cloudwatch_dashboard" "main" {
       {
         type = "metric"
         properties = {
-          title  = "ALB Latency (p95)"
-          period = 60
+          title   = "ALB Latency (p95)"
+          region  = "us-east-1"
+          period  = 60
           metrics = [
             ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", aws_lb.main.arn_suffix]
           ]
@@ -160,8 +163,9 @@ resource "aws_cloudwatch_dashboard" "main" {
       {
         type = "metric"
         properties = {
-          title  = "HTTP Error Rates"
-          period = 60
+          title   = "HTTP Error Rates"
+          region  = "us-east-1"
+          period  = 60
           metrics = [
             ["AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "LoadBalancer", aws_lb.main.arn_suffix],
             ["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", aws_lb.main.arn_suffix]
