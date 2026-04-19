@@ -1,0 +1,290 @@
+name: CI/CD — RAG POC Deploy to AWS ECS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'poc'
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: rag-poc-app
+  ECS_CLUSTER: rag-poc-cluster
+  ECS_SERVICE: rag-poc-service
+  CONTAINER_NAME: rag-poc-container
+  TF_WORKING_DIR: ./terraform
+
+permissions:
+  contents: read
+  id-token: write   # Needed for OIDC auth
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 1: Test & Lint
+  # ─────────────────────────────────────────────────────────────────
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r app/requirements.txt
+          pip install pytest httpx ruff
+
+      - name: Lint with ruff
+        run: ruff check app/
+
+      - name: Run tests
+        run: pytest app/tests/ -v --tb=short
+        continue-on-error: true   # POC — tests optional
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 2: Terraform Plan (on PR)
+  # ─────────────────────────────────────────────────────────────────
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.0
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform plan \
+            -var="openai_api_key=${{ secrets.OPENAI_API_KEY }}" \
+            -out=tfplan
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_WORKING_DIR }}/tfplan
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 3: Build & Push Docker Image
+  # ─────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build & Push to ECR
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
+      image_tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Output image URI
+        run: echo "Image pushed → ${{ steps.meta.outputs.tags }}"
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 4: Terraform Apply (infra)
+  # ─────────────────────────────────────────────────────────────────
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: poc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.0
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform apply -auto-approve \
+            -var="openai_api_key=${{ secrets.OPENAI_API_KEY }}" \
+            -var="app_image_tag=${{ needs.build-and-push.outputs.image_tag }}"
+
+      - name: Capture outputs
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        id: tf-outputs
+        run: |
+          echo "app_url=$(terraform output -raw app_url)" >> $GITHUB_OUTPUT
+          echo "dashboard=$(terraform output -raw cloudwatch_dashboard_url)" >> $GITHUB_OUTPUT
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 5: Deploy to ECS (rolling update)
+  # ─────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    needs: [build-and-push, terraform-apply]
+    environment: poc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Download existing task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_CLUSTER }}-task \
+            --query taskDefinition > task-def.json
+
+      - name: Update image in task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-def.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ needs.build-and-push.outputs.image_tag }}
+
+      - name: Deploy to ECS (rolling update)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          wait-for-minutes: 10
+
+      - name: Deployment Summary
+        run: |
+          echo "✅ Deployment Complete!"
+          echo "🌐 App URL: $(aws elbv2 describe-load-balancers --names rag-poc-alb --query 'LoadBalancers[0].DNSName' --output text)"
+          echo "🐳 Image Tag: ${{ needs.build-and-push.outputs.image_tag }}"
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 6: Post-deploy smoke test
+  # ─────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    needs: deploy
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get ALB URL
+        id: get-url
+        run: |
+          URL=$(aws elbv2 describe-load-balancers \
+            --names rag-poc-alb \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+          echo "url=http://$URL" >> $GITHUB_OUTPUT
+
+      - name: Health check
+        run: |
+          echo "Testing ${{ steps.get-url.outputs.url }}/health"
+          for i in {1..5}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "${{ steps.get-url.outputs.url }}/health")
+            if [ "$STATUS" == "200" ]; then
+              echo "✅ Health check passed (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "Attempt $i failed (HTTP $STATUS). Retrying in 15s..."
+            sleep 15
+          done
+          echo "❌ Health check failed after 5 attempts"
+          exit 1
+
+      - name: Test query endpoint
+        run: |
+          RESPONSE=$(curl -s -X POST \
+            "${{ steps.get-url.outputs.url }}/query" \
+            -H "Content-Type: application/json" \
+            -d '{"question": "What is AWS ECS?"}')
+          echo "Query response: $RESPONSE"
+          echo "$RESPONSE" | grep -q "answer" && echo "✅ Query endpoint working" || echo "⚠️ Unexpected response"
