@@ -223,8 +223,13 @@ jobs:
 
       - name: Download existing task definition
         run: |
+          TASK_DEF=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query "services[0].taskDefinition" \
+            --output text)
           aws ecs describe-task-definition \
-            --task-definition ${{ env.ECS_CLUSTER }}-task \
+            --task-definition $TASK_DEF \
             --query taskDefinition > task-def.json
 
       - name: Update image in task definition
