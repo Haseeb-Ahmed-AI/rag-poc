@@ -610,3 +610,5 @@ terraform destroy -var="openai_api_key=placeholder"
 *AWS ECS · Terraform · GitHub Actions · LangChain · FastAPI · OpenAI*
 
 </div>
+#   R A G   P O C  
+ 
