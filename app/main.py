@@ -25,7 +25,7 @@ app.add_middleware(
 try:
     rag_engine = RAGEngine()
 except Exception as e:
-    logger.warning(f"Failed to initialize RAG engine: {e}. Server will start without RAG functionality.")
+    logger.warning(f"RAG engine not initialized: {e}")
     rag_engine = None
 
 class QueryRequest(BaseModel):
