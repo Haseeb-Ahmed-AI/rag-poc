@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from rag import RAGEngine
 import uvicorn
 import logging
-import os
+#import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
