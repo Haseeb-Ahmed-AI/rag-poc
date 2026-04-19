@@ -76,7 +76,12 @@ jobs:
 
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=rag-poc-terraform-state-195202616977" \
+            -backend-config="key=rag-poc/terraform.tfstate" \
+            -backend-config="region=us-east-1" \
+            -backend-config="encrypt=true"
 
       - name: Terraform Validate
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -173,7 +178,12 @@ jobs:
 
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=rag-poc-terraform-state-195202616977" \
+            -backend-config="key=rag-poc/terraform.tfstate" \
+            -backend-config="region=us-east-1" \
+            -backend-config="encrypt=true"
 
       - name: Terraform Apply
         working-directory: ${{ env.TF_WORKING_DIR }}

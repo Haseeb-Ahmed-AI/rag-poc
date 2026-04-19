@@ -7,14 +7,12 @@ terraform {
     }
   }
 
-  # Remote state — enable after creating the S3 bucket
-  # backend "s3" {
-  #   bucket         = "your-terraform-state-bucket"
-  #   key            = "rag-poc/terraform.tfstate"
-  #   region         = var.aws_region
-  #   encrypt        = true
-  #   dynamodb_table = "terraform-locks"
-  # }
+  backend "s3" {
+    bucket  = "rag-poc-terraform-state-195202616977"
+    key     = "rag-poc/terraform.tfstate"
+    region  = "us-east-1"
+    encrypt = true
+  }
 }
 
 provider "aws" {
@@ -78,13 +76,13 @@ resource "aws_route_table" "public" {
 }
 
 resource "aws_route_table_association" "public" {
-  count          = length(aws_subnet.public)
+  count          = length(var.public_subnet_cidrs)
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
 
 resource "aws_route_table" "private" {
-  count  = length(aws_subnet.private)
+  count  = length(var.private_subnet_cidrs)
   vpc_id = aws_vpc.main.id
   route {
     cidr_block     = "0.0.0.0/0"
