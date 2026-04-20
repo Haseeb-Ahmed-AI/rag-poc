@@ -103,6 +103,7 @@ rag-poc/
 
 ---
 
+
 ## ✅ Prerequisites
 
 | Tool | Install |
@@ -117,6 +118,7 @@ rag-poc/
 
 ## 🚀 Setup Guide
 
+
 ### Step 1 — Clone the Repo
 
 ```bash
@@ -130,6 +132,7 @@ cd rag-poc
 aws configure
 # Enter your Access Key, Secret Key, region (us-east-1), and output (json)
 ```
+
 
 ### Step 3 — Add GitHub Secrets
 
@@ -152,6 +155,7 @@ git push origin main
 
 Watch it run at: **GitHub repo → Actions tab**
 
+
 ### Step 5 — Tear Down (stop billing)
 
 ```bash
@@ -160,6 +164,7 @@ terraform destroy -auto-approve
 ```
 
 ---
+
 
 ## 🔄 CI/CD Pipeline
 
@@ -180,6 +185,7 @@ Pull Requests only run Test + Terraform Plan — no deploy.
 ---
 
 ## 🧪 API Endpoints
+
 
 | Method | Endpoint | Description |
 |---|---|---|
